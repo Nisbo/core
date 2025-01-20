@@ -7,7 +7,7 @@ from aiounifi.models.client import ClientReconnectRequest, ClientRemoveRequest
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.const import ATTR_DEVICE_ID
+from homeassistant.const import ATTR_DEVICE_ID, CONF_UNIT_OF_MEASUREMENT
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC
@@ -17,14 +17,24 @@ from .const import DOMAIN as UNIFI_DOMAIN
 SERVICE_RECONNECT_CLIENT = "reconnect_client"
 SERVICE_REMOVE_CLIENTS = "remove_clients"
 
+CONF_FIRST_SEEN_THRESHOLD = "first_seen_threshold"
+DEFAULT_FIRST_SEEN_THRESHOLD = 900
+
 SERVICE_RECONNECT_CLIENT_SCHEMA = vol.All(
     vol.Schema({vol.Required(ATTR_DEVICE_ID): str})
+)
+
+SERVICE_REMOVE_CLIENTS_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_FIRST_SEEN_THRESHOLD, default=DEFAULT_FIRST_SEEN_THRESHOLD): vol.Coerce(int),
+    }
 )
 
 SUPPORTED_SERVICES = (SERVICE_RECONNECT_CLIENT, SERVICE_REMOVE_CLIENTS)
 
 SERVICE_TO_SCHEMA = {
     SERVICE_RECONNECT_CLIENT: SERVICE_RECONNECT_CLIENT_SCHEMA,
+    SERVICE_REMOVE_CLIENTS: SERVICE_REMOVE_CLIENTS_SCHEMA,
 }
 
 
@@ -82,9 +92,11 @@ async def async_remove_clients(hass: HomeAssistant, data: Mapping[str, Any]) -> 
     """Remove select clients from UniFi Network.
 
     Validates based on:
-    - Total time between first seen and last seen is less than 15 minutes.
+    - Total time between first seen and last seen is less than the provided threshold.
     - Neither IP, hostname nor name is configured.
     """
+    first_seen_threshold = data.get(CONF_FIRST_SEEN_THRESHOLD, DEFAULT_FIRST_SEEN_THRESHOLD)
+
     for config_entry in hass.config_entries.async_entries(UNIFI_DOMAIN):
         if config_entry.state is not ConfigEntryState.LOADED or (
             (hub := config_entry.runtime_data) and not hub.available
@@ -97,7 +109,7 @@ async def async_remove_clients(hass: HomeAssistant, data: Mapping[str, Any]) -> 
             if (
                 client.last_seen
                 and client.first_seen
-                and client.last_seen - client.first_seen > 900
+                and client.last_seen - client.first_seen > first_seen_threshold
             ):
                 continue
 
